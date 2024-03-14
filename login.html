@@ -1,29 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>Login</title>
-</head>
+  </head>
 
-<body>
+  <body>
     <p><strong>Want to access your personal web page?</strong></p>
     <p>Please login to proceed</p>
-    <form action="/login" method="post"> <!-- when the formulary is submitted, it will be POSTed to /login-->
-        <div>
-            <label>Username:</label>
-            <input type="text" name="username" />
-            <!-- the name MUST match the one defined in the local 'username-password' strategy -->
-        </div>
-        <div>
-            <label>Password:</label>
-            <input type="password" name="password" />
-            <!-- the name MUST match the one defined in the local 'username-password' strategy -->
-        </div>
-        <div>
-            <input type="submit" value="Log In" />
-        </div>
+    <form action="/login" method="post">
+      <!-- when the formulary is submitted, it will be POSTed to /login-->
+      <div>
+        <label>Username:</label>
+        <input type="text" name="username" />
+        <!-- the name MUST match the one defined in the local 'username-password' strategy -->
+      </div>
+      <div>
+        <label>Password:</label>
+        <input type="password" name="password" />
+        <!-- the name MUST match the one defined in the local 'username-password' strategy -->
+      </div>
+      <div>
+        <input type="submit" value="Log In" />
+      </div>
     </form>
-</body>
-
+  </body>
 </html>
