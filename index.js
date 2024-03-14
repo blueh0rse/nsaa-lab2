@@ -21,7 +21,7 @@ const jwtSecret = require("crypto").randomBytes(16);
 const db = new sqlite3.Database("users.db", (err) => {
   if (err) throw err;
   db.run(
-    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password TEXT NOT NULL)"
+    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL)"
   );
 });
 
@@ -39,20 +39,38 @@ app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
 // Password hashing function using scrypt
-async function hashPassword(password) {
+async function hashPassword(password, user_role) {
   const passwordBuffer = Buffer.from(password);
   const salt = Buffer.from("some_random_salt");
-  const N = 16384,
-    r = 8,
-    p = 1,
-    dkLen = 32;
-  const hash = await scrypt.scrypt(passwordBuffer, salt, N, r, p, dkLen);
+  const fastKDFParams = {
+    N: 16384, // Lower cost parameter for fast setup
+    r: 8, // Block size parameter
+    p: 1, // Parallelization parameter
+    dkLen: 32,
+  };
+  const slowKDFParams = {
+    N: 1048576, // Higher cost parameter for slow setup
+    r: 8, // Block size parameter
+    p: 1, // Parallelization parameter
+    dkLen: 32,
+  };
+  // fast by default
+  const params = user_role === "admin" ? slowKDFParams : fastKDFParams;
+  console.log(`user_role ${user_role}`);
+  const hash = await scrypt.scrypt(
+    passwordBuffer,
+    salt,
+    params.N,
+    params.r,
+    params.p,
+    params.dkLen
+  );
   return Buffer.from(hash).toString("hex");
 }
 
 // Password verification function
-async function verifyPassword(storedHash, providedPassword) {
-  const providedHash = await hashPassword(providedPassword);
+async function verifyPassword(storedHash, providedPassword, user_role) {
+  const providedHash = await hashPassword(providedPassword, user_role);
   return storedHash === providedHash;
 }
 
@@ -67,14 +85,14 @@ passport.use(
     },
     (username, password, done) => {
       db.get(
-        "SELECT username, password FROM users WHERE username = ?",
+        "SELECT username, password, role FROM users WHERE username = ?",
         [username],
         async (err, row) => {
           if (err) return done(err);
           if (!row)
             return done(null, false, { message: "Incorrect username." });
-
-          if (await verifyPassword(row.password, password)) {
+          console.log(`row.role ${row.role}`);
+          if (await verifyPassword(row.password, password, row.role)) {
             return done(null, { username: row.username });
           } else {
             return done(null, false, { message: "Incorrect password." });
@@ -136,7 +154,7 @@ app.post(
       iss: "localhost:3000",
       aud: "localhost:3000",
       exp: Math.floor(Date.now() / 1000) + 604800,
-      role: "user",
+      role: req.user.role,
     };
     const token = jwt.sign(jwtClaims, jwtSecret.toString("hex"));
     res.cookie("jwt", token, { httpOnly: true, secure: false });
@@ -152,11 +170,11 @@ app.get("/logout", (req, res) => {
 
 // User registration
 app.post("/register", async (req, res) => {
-  const { username, password } = req.body;
-  const passwordHash = await hashPassword(password);
+  const { username, password, role } = req.body;
+  const passwordHash = await hashPassword(password, role);
   db.run(
-    "INSERT INTO users (username, password) VALUES (?, ?)",
-    [username, passwordHash],
+    "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+    [username, passwordHash, role],
     function (err) {
       if (err) res.status(400).json({ error: err.message });
       else res.status(201).json({ userId: this.lastID });
