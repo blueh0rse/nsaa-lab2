@@ -40,6 +40,7 @@ app.use(passport.initialize());
 
 // Password hashing function using scrypt
 async function hashPassword(password, user_role) {
+  console.log("hashPassword()");
   const passwordBuffer = Buffer.from(password);
   const salt = Buffer.from("some_random_salt");
   const fastKDFParams = {
@@ -56,7 +57,8 @@ async function hashPassword(password, user_role) {
   };
   // fast by default
   const params = user_role === "admin" ? slowKDFParams : fastKDFParams;
-  console.log(`user_role ${user_role}`);
+  console.log(`Selecting parameters for role: ${user_role}`);
+  console.log("Starting to hash...");
   const hash = await scrypt.scrypt(
     passwordBuffer,
     salt,
@@ -65,11 +67,13 @@ async function hashPassword(password, user_role) {
     params.p,
     params.dkLen
   );
+  console.log("Hashing complete!");
   return Buffer.from(hash).toString("hex");
 }
 
 // Password verification function
 async function verifyPassword(storedHash, providedPassword, user_role) {
+  console.log("verifyPassword()");
   const providedHash = await hashPassword(providedPassword, user_role);
   return storedHash === providedHash;
 }
@@ -84,6 +88,7 @@ passport.use(
       session: false,
     },
     (username, password, done) => {
+      console.log("Strategy: username-password");
       db.get(
         "SELECT username, password, role FROM users WHERE username = ?",
         [username],
@@ -91,7 +96,6 @@ passport.use(
           if (err) return done(err);
           if (!row)
             return done(null, false, { message: "Incorrect username." });
-          console.log(`row.role ${row.role}`);
           if (await verifyPassword(row.password, password, row.role)) {
             return done(null, { username: row.username });
           } else {
@@ -112,6 +116,7 @@ passport.use(
       secretOrKey: jwtSecret.toString("hex"),
     },
     (jwtPayload, done) => {
+      console.log("Strategy: jwtCookie");
       if (jwtPayload.sub) {
         return done(null, {
           username: jwtPayload.sub,
@@ -132,12 +137,14 @@ app.get(
     failureRedirect: "/login",
   }),
   (req, res) => {
+    console.log("GET /");
     res.send(`Welcome to your private page, ${req.user.username}!`);
   }
 );
 
 // Login page
 app.get("/login", (req, res) => {
+  console.log("GET /login");
   res.sendFile("login.html", { root: __dirname });
 });
 
@@ -149,6 +156,7 @@ app.post(
     session: false,
   }),
   (req, res) => {
+    console.log("POST /login");
     const jwtClaims = {
       sub: req.user.username,
       iss: "localhost:3000",
@@ -157,6 +165,7 @@ app.post(
       role: req.user.role,
     };
     const token = jwt.sign(jwtClaims, jwtSecret.toString("hex"));
+    console.log(`token: ${token}`);
     res.cookie("jwt", token, { httpOnly: true, secure: false });
     res.redirect("/");
   }
@@ -164,12 +173,14 @@ app.post(
 
 // Logout handler
 app.get("/logout", (req, res) => {
+  console.log("GET logout/");
   res.clearCookie("jwt", { httpOnly: true, secure: false });
   res.redirect("/login");
 });
 
 // User registration
 app.post("/register", async (req, res) => {
+  console.log("POST /register");
   const { username, password, role } = req.body;
   const passwordHash = await hashPassword(password, role);
   db.run(
@@ -184,6 +195,7 @@ app.post("/register", async (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  console.log("ERROR!");
   res.status(500).send("Something broke!");
 });
 
