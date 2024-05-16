@@ -1,4 +1,6 @@
-// Imports
+// **********
+// IMPORTS
+// **********
 const express = require("express");
 const logger = require("morgan");
 const passport = require("passport");
@@ -11,13 +13,20 @@ const bodyParser = require("body-parser");
 const scrypt = require("scrypt-js");
 const LocalStrategy = require("passport-local").Strategy;
 const JwtStrategy = require("passport-jwt").Strategy;
+const dotenv = require("dotenv");
+dotenv.config();
+const axios = require("axios");
 
-// Initialize Express app and set port
+// **********
+// EXPRESS
+// **********
 const app = express();
 const port = 3000;
 const jwtSecret = require("crypto").randomBytes(16);
 
-// Database setup: Connect to SQLite and create users table if it doesn't exist
+// **********
+// DATABASE
+// **********
 const db = new sqlite3.Database("users.db", (err) => {
   if (err) throw err;
   db.run(
@@ -26,33 +35,39 @@ const db = new sqlite3.Database("users.db", (err) => {
 });
 
 // Server options for HTTPS
-const options = {
-  key: fs.readFileSync("server.key"),
-  cert: fs.readFileSync("server.cert"),
-};
+// const options = {
+//   key: fs.readFileSync("server.key"),
+//   cert: fs.readFileSync("server.cert"),
+// };
 
-// Middleware
+// **********
+// MIDDLEWARES
+// **********
 app.use(bodyParser.json());
 app.use(logger("dev"));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
-// Password hashing function using scrypt
+// **********
+// FUNC: HASH PASSWORD - scrypt
+// **********
 async function hashPassword(password, user_role) {
   console.log("hashPassword()");
   const passwordBuffer = Buffer.from(password);
   const salt = Buffer.from("some_random_salt");
+  // Lower cost parameter for fast setup
   const fastKDFParams = {
-    N: 16384, // Lower cost parameter for fast setup
-    r: 8, // Block size parameter
-    p: 1, // Parallelization parameter
+    N: 16384,
+    r: 8,
+    p: 1,
     dkLen: 32,
   };
+  // Higher cost parameter for slow setup
   const slowKDFParams = {
-    N: 1048576, // Higher cost parameter for slow setup
-    r: 8, // Block size parameter
-    p: 1, // Parallelization parameter
+    N: 1048576,
+    r: 8,
+    p: 1,
     dkLen: 32,
   };
   // fast by default
@@ -71,14 +86,18 @@ async function hashPassword(password, user_role) {
   return Buffer.from(hash).toString("hex");
 }
 
-// Password verification function
+// **********
+// FUNC: VERIFY PASSWORD
+// **********
 async function verifyPassword(storedHash, providedPassword, user_role) {
   console.log("verifyPassword()");
   const providedHash = await hashPassword(providedPassword, user_role);
   return storedHash === providedHash;
 }
 
-// Passport local strategy for username and password login
+// **********
+// STRAT: USERNAME:PASSWORD LOCAL
+// **********
 passport.use(
   "username-password",
   new LocalStrategy(
@@ -107,7 +126,9 @@ passport.use(
   )
 );
 
-// JWT strategy for cookie-stored token verification
+// **********
+// STRAT: JWT COOKIE
+// **********
 passport.use(
   "jwtCookie",
   new JwtStrategy(
@@ -128,8 +149,11 @@ passport.use(
   )
 );
 
-// Routes
-// Home page, protected by JWT
+// **********
+// ROUTES
+// **********
+
+// HOME: GET /
 app.get(
   "/",
   passport.authenticate("jwtCookie", {
@@ -142,13 +166,13 @@ app.get(
   }
 );
 
-// Login page
+// LOGIN: GET /LOGIN
 app.get("/login", (req, res) => {
   console.log("GET /login");
   res.sendFile("login.html", { root: __dirname });
 });
 
-// Login handler
+// LOGIN: POST /LOGIN
 app.post(
   "/login",
   passport.authenticate("username-password", {
@@ -171,14 +195,14 @@ app.post(
   }
 );
 
-// Logout handler
+// LOGOUT: GET /LOGOUT
 app.get("/logout", (req, res) => {
   console.log("GET logout/");
   res.clearCookie("jwt", { httpOnly: true, secure: false });
   res.redirect("/login");
 });
 
-// User registration
+// REGISTER: GET /REGISTER
 app.post("/register", async (req, res) => {
   console.log("POST /register");
   const { username, password, role } = req.body;
@@ -191,6 +215,70 @@ app.post("/register", async (req, res) => {
       else res.status(201).json({ userId: this.lastID });
     }
   );
+});
+
+// 5.4
+
+app.get("/oauth2cb", async (req, res) => {
+  /**
+   * 1. Retrieve the authorization code from the query parameters
+   */
+  const code = req.query.code; // Here we have the received code
+  if (code === undefined) {
+    const err = new Error("no code provided");
+    err.status = 400; // Bad Request
+    throw err;
+  }
+
+  /**
+   * 2. Exchange the authorization code for an actual access token at OUATH2_TOKEN_URL
+   */
+  const tokenResponse = await axios.post(process.env.OAUTH2_TOKEN_URL, {
+    client_id: process.env.OAUTH2_CLIENT_ID,
+    client_secret: process.env.OAUTH2_CLIENT_SECRET,
+    code,
+  });
+
+  // response.data contains the params of the response, including access_token, scopes granted by the use and type.
+  console.log(tokenResponse.data);
+
+  // Let us parse them and get the access token and the scope
+  const params = new URLSearchParams(tokenResponse.data);
+  const accessToken = params.get("access_token");
+  const scope = params.get("scope");
+
+  // if the scope does not include what we wanted, authorization fails
+  if (scope !== "user:email") {
+    console.log(scope);
+    const err = new Error("user did not consent to release email");
+    err.status = 401; // Unauthorized
+    throw err;
+  }
+
+  /**
+   * 3. Use the access token to retrieve the user email from the USER_API endpoint
+   */
+  const userDataResponse = await axios.get(process.env.USER_API, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`, // we send the access token as a bearer token in the authorization header
+    },
+  });
+  console.log(userDataResponse.data);
+
+  /**
+   * 4. Create our JWT using the github email as subject, and set the cookie.
+   */
+  const jwtClaims = {
+    sub: userDataResponse.data.email,
+    iss: "localhost:3000",
+    aud: "localhost:3000",
+    exp: Math.floor(Date.now() / 1000) + 604800,
+    role: "user",
+  };
+  const token = jwt.sign(jwtClaims, jwtSecret.toString("hex"));
+  console.log(`token: ${token}`);
+  res.cookie("jwt", token, { httpOnly: true, secure: false });
+  res.redirect("/");
 });
 
 // Error handling middleware
